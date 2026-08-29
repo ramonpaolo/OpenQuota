@@ -63,7 +63,11 @@ requireContracts('release', release, [
   'name: macOS Universal',
   'name: Build and smoke ${{ matrix.name }}',
   'Smoke test release artifact',
-  'uses: ./.github/actions/platform-smoke',
+  'name: Check out release smoke tooling',
+  'ref: ${{ github.workflow_sha }}',
+  'path: .release-workflow',
+  'sparse-checkout: .github/actions/platform-smoke',
+  'uses: ./.release-workflow/.github/actions/platform-smoke',
   "ENABLE_WINDOWS_NATIVE_SIGNING: ${{ vars.ENABLE_WINDOWS_NATIVE_SIGNING || 'false' }}",
   "ENABLE_MACOS_NATIVE_SIGNING: ${{ vars.ENABLE_MACOS_NATIVE_SIGNING || 'false' }}",
   'windows_signing: ${{ steps.signing_policy.outputs.windows_signing }}',
@@ -73,7 +77,14 @@ requireContracts('release', release, [
   'if [[ "$MACOS_SIGNING_ENABLED" = true ]]',
   "if: runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true'",
   "if: runner.os == 'macOS' && needs.validate.outputs.macos_signing != 'true'",
+  "if: runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true'",
   'echo \'APPLE_SIGNING_IDENTITY=-\' >> "$GITHUB_ENV"',
+  'name: Configure native macOS signing',
+  'write_env APPLE_CERTIFICATE "$OPENQUOTA_APPLE_CERTIFICATE"',
+  'write_env APPLE_CERTIFICATE_PASSWORD "$OPENQUOTA_APPLE_CERTIFICATE_PASSWORD"',
+  'write_env APPLE_ID "$OPENQUOTA_APPLE_ID"',
+  'write_env APPLE_PASSWORD "$OPENQUOTA_APPLE_PASSWORD"',
+  'write_env APPLE_TEAM_ID "$OPENQUOTA_APPLE_TEAM_ID"',
   "needs.validate.outputs.windows_signing == 'true' && matrix.windows-signing-args",
   "ES_USERNAME: ${{ steps.signing_policy.outputs.windows_signing == 'true' && secrets.ES_USERNAME || '' }}",
   "ES_PASSWORD: ${{ steps.signing_policy.outputs.windows_signing == 'true' && secrets.ES_PASSWORD || '' }}",
@@ -90,11 +101,6 @@ requireContracts('release', release, [
   "ES_CREDENTIAL_ID: ${{ runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true' && secrets.ES_CREDENTIAL_ID || '' }}",
   "ES_TOTP_SECRET: ${{ runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true' && secrets.ES_TOTP_SECRET || '' }}",
   "OPENQUOTA_EXPECTED_WINDOWS_SIGNER_SUBJECT: ${{ runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true' && vars.WINDOWS_SIGNER_SUBJECT || '' }}",
-  "APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_CERTIFICATE || '' }}",
-  "APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}",
-  "APPLE_ID: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_ID || '' }}",
-  "APPLE_PASSWORD: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_PASSWORD || '' }}",
-  "APPLE_TEAM_ID: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_TEAM_ID || '' }}",
   "release-validation: ${{ (runner.os == 'Linux' || (runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true') || (runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true')) && 'true' || 'false' }}",
   "windows-signer-subject: ${{ runner.os == 'Windows' && needs.validate.outputs.windows_signing == 'true' && vars.WINDOWS_SIGNER_SUBJECT || '' }}",
   "apple-team-id: ${{ runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.APPLE_TEAM_ID || '' }}",
@@ -102,6 +108,12 @@ requireContracts('release', release, [
   'apple-team-id:',
   'needs: [validate, prepare-release, publish-artifacts]',
   'Verify release smoke checks',
+  'VERIFY_ONLY: ${{ inputs.verify_only }}',
+  'repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100',
+  'repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?filter=all&per_page=100',
+  'jobs_key=check_runs',
+  'jobs_key=jobs',
+  '.[$key] | any(.name == $name and .conclusion == "success")',
   'Build and smoke Windows x64',
   'Build and smoke Windows ARM64',
   'Build and smoke Linux x64',
@@ -137,23 +149,18 @@ requireContracts('release', release, [
   "needs.validate.result == 'success' && (inputs.verify_only",
   'dbus-tests',
   '--config src-tauri/tauri.windows-signing.conf.json',
-  '<!-- openquota-native-trust:start -->',
-  '<!-- openquota-native-trust:end -->',
-  'gh release edit "$RELEASE_TAG"',
-  'Verify native trust release notes',
-  'count_line() {',
-  "windows_signed='- Windows installers are Authenticode-signed and verified.'",
-  "windows_unsigned='- Windows installers are not Authenticode-signed, so SmartScreen may warn.'",
-  "macos_signed='- The macOS build is Developer ID-signed, notarized, and verified.'",
-  "macos_unsigned='- The macOS build uses an ad-hoc signature and is not notarized, so Gatekeeper may require manual approval.'",
-  'test "$(count_line "$windows_signed")" -eq 1',
-  'test "$(count_line "$windows_unsigned")" -eq 1',
-  'test "$(count_line "$macos_signed")" -eq 1',
-  'test "$(count_line "$macos_unsigned")" -eq 1',
-  'test "$(count_line "$windows_signed")" -eq 0',
-  'test "$(count_line "$windows_unsigned")" -eq 0',
-  'test "$(count_line "$macos_signed")" -eq 0',
-  'test "$(count_line "$macos_unsigned")" -eq 0',
+]);
+
+requireContracts('release smoke tooling checkout', release, [
+  `      - name: Check out release smoke tooling
+        uses: actions/checkout@v7
+        with:
+          ref: \${{ github.workflow_sha }}
+          path: .release-workflow
+          sparse-checkout: .github/actions/platform-smoke
+
+      - name: Smoke test release artifact
+        uses: ./.release-workflow/.github/actions/platform-smoke`,
 ]);
 
 const expression = (value) => `\${{ ${value} }}`;
@@ -170,13 +177,9 @@ const exactSigningBindings = {
   macos_signing: [`macos_signing: ${expression('steps.signing_policy.outputs.macos_signing')}`],
   WINDOWS_SIGNING_ENABLED: [
     `WINDOWS_SIGNING_ENABLED: ${expression('steps.signing_policy.outputs.windows_signing')}`,
-    `WINDOWS_SIGNING_ENABLED: ${expression('needs.validate.outputs.windows_signing')}`,
-    `WINDOWS_SIGNING_ENABLED: ${expression('needs.validate.outputs.windows_signing')}`,
   ],
   MACOS_SIGNING_ENABLED: [
     `MACOS_SIGNING_ENABLED: ${expression('steps.signing_policy.outputs.macos_signing')}`,
-    `MACOS_SIGNING_ENABLED: ${expression('needs.validate.outputs.macos_signing')}`,
-    `MACOS_SIGNING_ENABLED: ${expression('needs.validate.outputs.macos_signing')}`,
   ],
   TAURI_SIGNING_PRIVATE_KEY: [
     `TAURI_SIGNING_PRIVATE_KEY: ${expression('secrets.TAURI_SIGNING_PRIVATE_KEY')}`,
@@ -210,7 +213,10 @@ for (const name of [
 ]) {
   exactSigningBindings[name] = [
     `${name}: ${expression(`steps.signing_policy.outputs.macos_signing == 'true' && secrets.${name} || ''`)}`,
-    `${name}: ${expression(`runner.os == 'macOS' && needs.validate.outputs.macos_signing == 'true' && secrets.${name} || ''`)}`,
+  ];
+
+  exactSigningBindings[`OPENQUOTA_${name}`] = [
+    `OPENQUOTA_${name}: ${expression(`secrets.${name}`)}`,
   ];
 }
 
@@ -268,6 +274,7 @@ requireContracts('Windows package smoke', windows, [
   'SignerCertificate.Thumbprint',
   'system tray integration ready',
   'OpenQuota startup completed',
+  'for ($attempt = 0; $attempt -lt 60; $attempt++)',
   'Expected Windows GUI subsystem (2)',
   "-ArgumentList '/S'",
   'remained installed after the NSIS uninstall smoke test',
@@ -334,8 +341,12 @@ requireContracts('Linux X11 package smoke', linuxX11, [
   'OpenQuota startup completed',
   'kill "${watcher_pid}"',
   'system tray became unavailable; using standalone window',
-  'xdotool search --onlyvisible --limit 1 --name "^OpenQuota$"',
+  'xdotool search --onlyvisible --limit 1 --pid "${app_pid}" --name "^OpenQuota$"',
   'xdotool windowclose',
+  'close_attempted=false',
+  'close_requested=false',
+  'exited before its standalone window was closed',
+  'did not keep a visible standalone window available for closing',
   'did not exit when its standalone window was closed',
 ]);
 
@@ -388,6 +399,18 @@ for (const obsoleteContract of ['smoke-binary:', 'binary-path:', 'bundle-directo
   if (release.includes(obsoleteContract) || action.includes(obsoleteContract)) {
     throw new Error(
       `Packaged smoke configuration still uses raw-binary input: ${obsoleteContract}`,
+    );
+  }
+}
+
+for (const removedReleaseNoteContract of [
+  'openquota-native-trust:start',
+  '## Native package trust',
+  'Verify native trust release notes',
+]) {
+  if (release.includes(removedReleaseNoteContract)) {
+    throw new Error(
+      `Release notes still expose native trust status: ${removedReleaseNoteContract}`,
     );
   }
 }
